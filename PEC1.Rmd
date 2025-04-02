@@ -1,0 +1,382 @@
+---
+output:
+  pdf_document:
+    toc: false
+    toc_depth: 1
+    keep_tex: true
+    latex_engine: xelatex
+    number_sections: false
+    includes:
+      in_header: preamble.tex
+  html_document:
+    toc: true
+    number_sections: false
+nocite: "@*"
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+# Configuración de fecha del informe dinámico
+date <- Sys.Date()
+fecha_format <- format(date, "%d de %B de %Y") # "23 de marzo de 2025"
+
+# Configuración global de opciones de chunks
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE,
+	cache = FALSE,
+	comment = NA,
+	out.width = "90%",
+	prompt = FALSE,
+	size = "small"
+)
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+# Para detectar errores por el uso de Tinytex:
+options(tinytex.verbose = TRUE)
+
+# Cargar o instalar paquetes CRAN y Bioconductor necesarios
+cran_packages <- c("pheatmap", "dendextend", "knitr", "ggplot2", "dplyr", "grid", "kableExtra", "tidyverse", "tibble")
+bioc_packages <- c("SummarizedExperiment")
+
+# Instalar CRAN
+for (pkg in cran_packages) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg)
+    library(pkg, character.only = TRUE)
+  }
+}
+
+# Instalar Bioconductor si no está instalado
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+
+# Instalar y cargar paquetes Bioconductor
+for (pkg in bioc_packages) {
+  if (!require(pkg, character.only = TRUE)) {
+    BiocManager::install(pkg)
+    library(pkg, character.only = TRUE)
+  }
+}
+```
+
+\begin{center}
+\includegraphics[width=0.75\textwidth]{logoUOC.png}
+\end{center}
+\begin{center}
+{\Huge \textbf{M0.157 - Análisis de datos ómicos}}
+\end{center}
+\begin{center}
+{\LARGE \textbf{PEC 1}}
+\end{center}
+\begin{center}
+{\large 
+  \textbf{Autor:} Cristina Pozo Salgado\\
+  \vspace{0.35cm}
+  \textbf{Fecha:} `r fecha_format`
+}
+\end{center}
+\tableofcontents
+\newpage
+
+## Abstract
+
+Se analizó un dataset de metabolómica, proveniente de un estudio sobre cachexia, en el que se evaluaron 63 metabolitos relevantes para los procesos metabólicos asociados a la pérdida muscular. El dataset integró 77 muestras, distribuidas en 47 pertenecientes al grupo “cachexic” y 30 al grupo “control”. 
+
+Se calculó un resumen estadístico que evidenció una alta variabilidad en los niveles de expresión, con una media de 347.37, mediana de 51.42 y un amplio rango (0.79–33860.35). La aplicación de un análisis de Componentes Principales (PCA) redujo la dimensionalidad del dataset; sin embargo, los dos primeros componentes, que explicaron el 48.6 % de la varianza, no separaron claramente los grupos. El clustering jerárquico y el heatmap complementaron estos hallazgos, mostrando agrupamientos parciales con solapamiento entre las condiciones. 
+
+Estos resultados resaltan la complejidad del perfil metabólico y la necesidad de métodos analíticos más sofisticados para detectar diferencias sutiles entre las condiciones.
+
+## Objetivos
+
+- **Objetivo principal:**
+
+Analizar el dataset de metabolómica *human_cachexia.csv* para identificar diferencias en la expresión metabólica asociadas a la cachexia, mediante un análisis de componentes principales (PCA), clustering jerárquico y generación de mapas de calor.
+
+- **Objetivos específicos:**
+
+1. Crear un objeto de clase SummarizedExperiment que consolide los datos y metadatos del dataset de forma estructurada.
+
+2. Realizar un análisis descriptivo del dataset para determinar la distribución y variabilidad de los metabolitos.
+
+3. Aplicar análisis de componentes principales (PCA) y clustering jerárquico para explorar la estructura subyacente de los datos.
+
+4. Generar visualizaciones (heatmaps) que faciliten la interpretación de los resultados.
+
+5. Interpretar los hallazgos en el contexto biológico y discutir las limitaciones del estudio.
+
+## Metodología
+
+El análisis se realizó mediante un enfoque integrado, combinando herramientas estadísticas y de visualización en R, estructuradas en un objeto de clase SummarizedExperiment. A continuación, se describieron los pasos fundamentales del proceso:
+
+**1. Origen del dataset:**
+
+El archivo human_cachexia.csv se obtuvo desde el repositorio [metaboData](https://github.com/nutrimetabolomics/metaboData/tree/79036d1897db72955c0aa0634c1a6aa06d0532fa/Datasets/2024-Cachexia), mantenido por *nutrimetabolomics*, en el que se almacena una colección de datasets de metabolómica.
+
+**2. Selección y preparación del dataset:**
+
+Se seleccionó el archivo *human_cachexia.csv* por cumplir con los criterios de disponibilidad en formato descargable (.csv), la inclusión de metadatos relevantes y la ausencia de valores perdidos. Este dataset contiene medidas cuantitativas de metabolitos correspondientes a dos grupos experimentales: "cachexic" y "control", y ha sido utilizado previamente en diversos tutoriales de MetaboAnalyst [@CachexiaDataset2024].
+\newpage
+
+**3. Creación del objeto SummarizedExperiment:**
+
+A continuación se creó el objeto SummarizedExperiment, utilizando el paquete homónimo de Bioconductor. ExpressionSet y SummarizedExperiment son clases S4 desarrolladas en Bioconductor para organizar datos ómicos (como microarrays, RNA-seq o metabolómica), pero SummarizedExperiment es una evolución más flexible y moderna. [@SummarizedExperiment2023]
+
+Con este procedimiento se consolidó la matriz de expresión, en la que las filas representaron los metabolitos y las columnas, las muestras; los metadatos de filas, incluyendo los nombres de los metabolitos; y los metadatos de columnas, para la información de grupo (cachexic vs. control).
+
+```{r load-data}
+# Leer el archivo
+datos <- readr::read_csv("human_cachexia.csv")
+
+# Extraer matriz de expresión (de columnas 3 en adelante)
+matriz_expr <- as.matrix(datos[ , -(1:2)])
+rownames(matriz_expr) <- datos$Name
+
+# Crear matriz de expresión: todas las columnas de metabolitos
+matriz_expr <- as.matrix(datos[ , -(1:2)])
+rownames(matriz_expr) <- datos$`Patient ID`
+
+# Crear metadatos de columnas (grupo: muscle loss)
+grupo <- datos$`Muscle loss`
+colData <- DataFrame(grupo = grupo)
+
+# Crear metadatos de filas: nombre de los metabolitos
+rowData <- DataFrame(nombre_metabolito = colnames(matriz_expr))
+
+# Crear el objeto SummarizedExperiment
+se <- SummarizedExperiment(
+  assays = list(expr = t(matriz_expr)),  # transponemos: metabolitos en filas
+  rowData = rowData,
+  colData = colData
+)
+
+# Comprobar creación
+cat("**Resumen del objeto SummarizedExperiment:**\n")
+se
+```
+
+Esta estructura permitió manejar de forma ordenada la información y facilitó la aplicación posterior de métodos estadísticos y de visualización. En el anexo (página 10) se puede consultar el resto de  comprobaciones realizadas tras la creación del objeto SummarizedExperiment.
+
+**4. Análisis Exploratorio de Datos:**
+
+El análisis exploratorio se dividió en varias etapas complementarias:
+
+**- Análisis Descriptivo:**
+
+Se analizaron las características generales del objeto SummarizedExperiment para obtener una visión global del dataset. En primer lugar, se imprimió el número de muestras (columnas) y metabolitos (filas) del objeto, lo que permitió conocer la dimensión de los datos y confirmar que se habían cargado correctamente.
+
+Posteriormente, se examinó la distribución de los grupos experimentales utilizando la información contenida en los metadatos (colData), mostrando la cantidad de muestras en cada grupo ("cachexic" y "control"). El objetivo de este ejercicio fue garantizar que la agrupación inicial fuese la esperada e identificar posibles desequilibrios entre los grupos.
+
+A continuación, se extrajo la matriz de expresión y se convirtió en un vector para calcular diversas medidas estadísticas globales: media, para evaluar la tendencia central; mediana, para identificar el valor centrar y detectar posibles asimetrías; y los valores mínimo y máximo, para conocer el rango de los datos y detectar la presencia de outliers o valores extremos.
+
+Además, se verificó la existencia de valores perdidos (NA) en la matriz de expresión, confirmando que el dataset estaba completo y no presentaba huecos en la información.
+
+En el anexo del informe se incluyó un resumen estadístico completo obtenido mediante la función summary(assay(se)), que ofreció un análisis más detallado de la distribución de todos los valores de expresión
+
+**- Análisis de Componentes Principales (PCA): **
+
+Se aplicó PCA tras escalar la matriz de expresión, lo que garantizó que todas las variables (metabolitos) se midieran en la misma escala y evitaran que aquellos con rangos mayores dominaran el análisis. La transposición de la matriz de datos se realizó para que cada muestra se tratara como una observación independiente, permitiendo evaluar la variabilidad global entre ellas. El PCA permitió reducir la dimensionalidad del dataset, identificando las direcciones (componentes principales) que explicaban la mayor parte de la variación. Esto facilitó la visualización de la estructura subyacente de los datos en un plano bidimensional y posibilitó la exploración de la separación entre los grupos experimentales ("cachexic" y "control"). [@UOCExploracion2023].
+
+**- Clustering Jerárquico y Visualización: **
+
+Se realizó un clustering jerárquico de las muestras utilizando la distancia euclidiana y la distancia euclidiana, la cual cuantificó las diferencias entre los perfiles de expresión. Se empleó el método de enlace completo para calcular las distancias entre grupos de muestras, lo que permitió construir un dendrograma que reflejara de forma clara la estructura de similitud y agrupamiento. Adicionalmente, se generó un heatmap a partir de los datos escalados por filas (metabolitos), lo que facilitó la identificación visual de patrones y agrupamientos. Esta representación gráfica ayudó a detectar subgrupos o anomalías en la expresión de los metabolitos, proporcionando una visión intuitiva de la organización de los datos. [@UOCExploracion2023; @Gentleman2005].
+
+El proceso se documentó y ejecutó utilizando R y RMarkdown, lo que permitió integrar el código, el análisis y las interpretaciones en un único documento reproducible. Se emplearon paquetes de CRAN (como ggplot2, dplyr y pheatmap) y herramientas de Bioconductor, lo que garantizó la robustez del análisis y la claridad en la presentación de los resultados.
+
+## Resultados
+
+**- Resultados del análisis descriptivo del dataset:**
+
+```{r se_features, echo=FALSE, results='asis'}
+cat("Características generales del objeto `SummarizedExperiment`:\n\n")
+cat("- Número de muestras (columnas):", ncol(se), "\n")
+cat("- Número de metabolitos (filas):", nrow(se), "\n\n")
+
+cat("\nDistribución de grupos (colData):\n")
+print(table(colData(se)$grupo))
+
+cat("\nResumen global de los valores de expresión:\n")
+# Convertir la matriz a vector
+valores <- as.vector(assay(se))  
+
+cat("\n- Media:", round(mean(valores, na.rm = TRUE), 2), "\n")
+cat("- Mediana:", round(median(valores, na.rm = TRUE), 2), "\n")
+cat("- Mínimo:", round(min(valores, na.rm = TRUE), 2), "\n")
+cat("- Máximo:", round(max(valores, na.rm = TRUE), 2), "\n")
+cat("- Desviación estándar:", round(sd(valores, na.rm = TRUE), 2), "\n")
+
+cat("\n Valores perdidos en la matriz de expresión:", sum(is.na(assay(se))), "\n")
+```
+
+En la evaluación de las características generales del objeto *SummarizedExperiment*, se obtuvo un total de 77 muestras y 63 metabolitos. La distribución de los grupos, según los metadatos (colData), mostró que el grupo "cachexic" comprendió 47 muestras, mientras que el grupo "control" incluyó 30 muestras, lo que permitió constatar que la representación de los grupos era adecuada para el análisis comparativo.
+
+El resumen global de los valores de expresión indicó que la media fue de 347.37 y la mediana de 51.42. La diferencia entre ambos estadísticos sugirió la presencia de una distribución asimétrica, ya que la media resultó considerablemente mayor que la mediana. Asimismo, se observó un amplio rango de valores, que osciló entre un mínimo de 0.79 y un máximo de 33860.35, con una desviación estándar de 1500.84, lo que evidenció una alta dispersión en los datos. 
+
+Es relevante señalar que no se detectaron valores perdidos en la matriz de expresión (Total NA: 0).
+
+```{r descriptive, echo=FALSE, results='asis'}
+# Extraer matriz de expresión y convertir a data frame
+expr_df <- as.data.frame(assay(se)) %>%
+  rownames_to_column("metabolito")
+
+# Calcular resumen por metabolito
+resumen <- expr_df %>%
+  rowwise() %>%
+  mutate(
+    media = mean(c_across(-metabolito), na.rm = TRUE),
+    mediana = median(c_across(-metabolito), na.rm = TRUE),
+    minimo = min(c_across(-metabolito), na.rm = TRUE),
+    maximo = max(c_across(-metabolito), na.rm = TRUE)
+  ) %>%
+  select(metabolito, media, mediana, minimo, maximo)
+
+# Mostrar tabla con kable
+kable(resumen, caption = "Resumen estadístico por metabolito",
+      digits = 2) %>%
+  kable_styling(latex_options = c("hold_position"))
+```
+
+En la tabla resumen por metabolitos (Tabla 1) se observó, por ejemplo, que el metabolito Creatinine presenta una media de 8733.97 y una mediana de 7708.28, junto con un rango que abarca desde 1002.25 hasta 33860.35. Esta discrepancia y el amplio rango sugirieron la presencia de valores atípicos que influyen significativamente en su distribución. De igual manera, el metabolito 2-Oxoglutarate mostró una diferencia notable entre su valor mínimo (5.53) y su máximo (2465.13), lo que indica una variabilidad considerable en su expresión entre las muestras.
+
+**- Resultados del análisis PCA:**
+
+Tras escalar la matriz de expresión, la primera componente principal (PC1) explicó un 40.4 % de la varianza, mientras que la segunda (PC2) explicó un 8.2 %, sumando en total un 48.6 % de la variabilidad presente en los datos. En la Figura 1, se muestra la proyección de las 77 muestras en el plano definido por estas dos primeras componentes, donde cada punto representa una muestra y su color indica el grupo experimental ("cachexic" en rojo y "control" en turquesa).
+
+
+```{r pca-plot, echo=FALSE, fig.env=NULL, out.width='0.8\\textwidth', fig.align='center'}
+# Calcular PCA sobre la matriz de expresión transpuesta
+pca <- prcomp(t(assay(se)), scale. = TRUE)
+
+# Calcular varianza explicada
+var_explicada <- round(100 * summary(pca)$importance[2, 1:2], 1)
+leyenda_color <- paste0("Grupo experimental (PC1: ", var_explicada[1], "%, PC2: ", var_explicada[2], "%)")
+
+# Crear data frame con componentes principales y grupos
+pca_df <- data.frame(
+  PC1 = pca$x[, 1],
+  PC2 = pca$x[, 2],
+  grupo = factor(colData(se)$grupo, levels = c("cachexic", "control"))
+)
+
+# Graficar
+ggplot(pca_df, aes(x = PC1, y = PC2, color = grupo)) +
+  geom_point(size = 3) +
+  labs(
+    title = "Análisis de Componentes Principales (PCA)",
+    x = "Componente principal 1",
+    y = "Componente principal 2",
+    color = leyenda_color,
+    caption = "Figura 1: Análisis de Componentes Principales (PCA)"
+  ) +
+  theme_minimal()
+```
+
+**- Resultados del clustering jerárquico de las muestras:**
+
+En la Figura 2 se muestra el dendrograma resultante de realizar un clustering jerárquico sobre la matriz de expresión transpuesta, utilizando la distancia euclidiana y el método de enlace completo, donde cada muestra se representa mediante una etiqueta en color rojo (grupo “cachexic”) o azul (grupo “control”). 
+
+```{r jerarquic-clustering, echo=FALSE, fig.env=NULL, fig.align='center'}
+# Obtener matriz de expresión transpuesta (muestras como filas)
+expr_t <- t(assay(se))
+
+# Calcular distancias entre muestras
+dist_muestras <- dist(expr_t)
+
+# Realizar clustering jerárquico (enlace completo)
+hc <- hclust(dist_muestras, method = "complete")
+
+# Crear vector de colores según grupo
+colores_grupo <- ifelse(colData(se)$grupo == "cachexic", "red", "blue")
+
+# Convertir a dendrograma coloreado
+dend <- as.dendrogram(hc)
+labels_colors(dend) <- colores_grupo[order.dendrogram(dend)]
+
+# Dibujar el dendrograma
+plot(dend, main = "Clustering jerárquico de las muestras", ylab = "Distancia")
+legend("topright", legend = c("cachexic", "control"),
+       col = c("red", "blue"), pch = 19, bty = "n")
+# Añadir un caption en la parte inferior
+mtext("Figura 2: Dendrograma del clustering jerárquico", side = 1, line = 4, cex = 0.8)
+```
+
+Se observaron varios subgrupos de muestras, algunos de los cuales incluyeron mayoritariamente muestras de un mismo grupo experimental; sin embargo, no se apreció una separación nítida que agrupara de forma consistente todas las muestras de “cachexic” frente a las de “control”. 
+
+**- Resultados del heatmap:**
+
+La Figura 3 muestra el mapa de calor gemeradp a partir de la matriz de expresión escalada por filas (metabolitos). Cada columna corresponde a una muestra y cada fila a un metabolito, ordenados mediante clustering jerárquico. La anotación superior indica el grupo experimental al que pertenece cada muestra (“cachexic” en rojo y “control” en azul), mientras que la escala de colores ilustra los niveles de expresión relativos de cada metabolito tras la estandarización.
+
+```{r heatmap, echo=FALSE, fig.env=NULL, fig.align='center'}
+# Escalar los datos: centrado y reducción por fila (metabolito)
+matriz <- assay(se)
+matriz_scaled <- t(scale(t(matriz)))  # escalar por metabolito (filas)
+
+# Crear vector de colores por grupo
+grupo_colores <- ifelse(colData(se)$grupo == "cachexic", "red", "blue")
+names(grupo_colores) <- colnames(matriz)
+
+# Anotación de muestras
+anotacion <- data.frame(grupo = colData(se)$grupo)
+rownames(anotacion) <- colnames(matriz)
+
+# Dibujar heatmap
+hmp <- pheatmap(
+  matriz_scaled,
+  annotation_col = anotacion,
+  annotation_colors = list(grupo = c(cachexic = "red", control = "blue")),
+  show_rownames = FALSE,
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+  fontsize_col = 7,
+  main = "Heatmap de los metabolitos escalados"
+)
+# Añadir caption en la parte inferior (ajusta 'y' según necesites)
+grid.text("Figura 3: Heatmap de los metabolitos escalados", x=0.5, y=0.005, gp=gpar(fontsize=10))
+```
+
+Se observó una distribución heterogénea de patrones de expresión, con regiones cuyos patrones de expresión estaban bien diferenciados, en las que determinados subconjuntos de muestras presentaron perfiles de expresión más altos o más bajos para un conjunto concreto de metabolitos. Sin embargo, de forma global, no se observó un patrón uniforme que separase claramente las muestras de “cachexic” y “control”.
+
+## Discusión
+
+Los resultados del análisis exploratorio ofrecieron una visión global y multidimensional del dataset de metabolómica human_cachexia.csv. El análisis descriptivo evidenció una elevada variabilidad en los niveles de expresión de los 63 metabolitos medidos en 77 muestras, distribuidas en 47 muestras del grupo "cachexic" y 30 del grupo "control". Los valores de tendencia central –con una media de 347.37 y una mediana de 51.42– junto con el amplio rango (0.79–33860.35) y una desviación estándar de 1500.84, indican distribuciones asimétricas y la presencia de outliers. Por ejemplo, el metabolito Creatinine mostró una marcada discrepancia entre sus valores mínimos y máximos, lo que sugiere la existencia de valores extremos que podrían deberse tanto a variabilidad biológica real como a posibles errores técnicos.
+
+El análisis de Componentes Principales (PCA) se aplicó para reducir la dimensionalidad y visualizar la variabilidad global entre las muestras. Los dos primeros componentes, que en conjunto explicaron menos del 50 % de la varianza total, no permitieron separar claramente los grupos "cachexic" y "control". Este hallazgo sugiere que las diferencias en la expresión metabólica no se concentran únicamente en las direcciones de mayor varianza, reflejando la complejidad del proceso patológico de la cachexia, donde múltiples vías metabólicas interactúan para generar patrones sutiles.
+
+El clustering jerárquico y el heatmap complementaron estos resultados, revelando agrupamientos parciales y regiones con patrones diferenciados, aunque con un considerable solapamiento entre las muestras de ambos grupos. Desde el punto de vista biológico, estos hallazgos sugieren que la cachexia está asociada a alteraciones en la homeostasis metabólica –posiblemente vinculadas a cambios en la degradación muscular y el metabolismo energético–, pero también indican que existen factores adicionales no medidos, como variaciones individuales, que contribuyen a la heterogeneidad observada.
+
+Además, las limitaciones detectadas, tales como la alta variabilidad, la presencia de outliers y la moderada capacidad discriminatoria de los análisis multivariantes empleados, resaltan la necesidad de incorporar métodos analíticos más sofisticados y de contar con información clínica complementaria en futuros estudios. Esto permitirá desentrañar con mayor precisión los biomarcadores asociados a la cachexia y mejorar la interpretación de las diferencias metabólicas entre las condiciones experimentales.
+
+## Conclusión
+
+El análisis exploratorio del dataset de metabolómica evidenció una alta variabilidad en los niveles de expresión de los metabolitos, reflejada en el amplio rango de valores y en las diferencias entre las medidas de tendencia central. La aplicación del PCA permitió visualizar la dispersión global de las muestras, aunque los dos primeros componentes, que explicaron menos del 50 % de la varianza total, no lograron separar de forma clara los grupos "cachexic" y "control", lo que sugiere que las diferencias entre condiciones no se concentran exclusivamente en las direcciones de mayor varianza.
+
+El clustering jerárquico y el heatmap complementaron estos hallazgos, mostrando agrupamientos parciales con cierto solapamiento entre las muestras de ambos grupos, lo que subraya la complejidad del perfil metabólico. Estos resultados destacan la utilidad del enfoque exploratorio para identificar tendencias generales en los datos ómicos, pero también señalan la necesidad de emplear métodos analíticos más sofisticados para capturar diferencias sutiles y mejorar la discriminación entre las condiciones experimentales.
+\newpage
+
+## Anexos
+
+- Comprobaciones realizadas tras la creación del objeto SummarizedExperiment
+
+```{r se_checks}
+cat("\n**Vista de los primeros metabolitos y muestras (assay):**\n")
+assay(se)[1:5, 1:5]
+
+cat("\n**Metadatos de muestras (colData):**\n")
+colData(se)
+
+cat("\n**Metadatos de metabolitos (rowData):**\n")
+rowData(se)
+```
+
+
+- Resumen estadístico del dataset:
+
+```{r descriptive-expand}
+cat("**Resumen estadístico general de los valores de expresión:**\n")
+summary(assay(se))
+```
+
+
+## Referencias
