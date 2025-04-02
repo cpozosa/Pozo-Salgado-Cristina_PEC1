@@ -78,6 +78,9 @@ for (pkg in bioc_packages) {
   \textbf{Fecha:} `r fecha_format`
 }
 \end{center}
+\begin{center}
+  \textbf{\href{https://github.com/cpozosa/Pozo-Salgado-Cristina_PEC1}{Repositorio GitHub}}
+\end{center}
 \tableofcontents
 \newpage
 
